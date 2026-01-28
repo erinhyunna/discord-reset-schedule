@@ -1,0 +1,71 @@
+name: Update Discord Reset Schedule
+
+on:
+  schedule:
+    # Runs every day at 06:59 UTC (15:59 KST)
+    - cron: "59 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Update Discord message
+        env:
+          WEBHOOK_ID: ${{ secrets.DISCORD_WEBHOOK_ID }}
+          WEBHOOK_TOKEN: ${{ secrets.DISCORD_WEBHOOK_TOKEN }}
+          MESSAGE_ID: ${{ secrets.DISCORD_MESSAGE_ID }}
+        run: |
+          python << 'EOF'
+          import datetime
+          import json
+          import urllib.request
+
+          KST_OFFSET = datetime.timedelta(hours=9)
+          now_utc = datetime.datetime.utcnow()
+          now_kst = now_utc + KST_OFFSET
+
+          # --- Daily reset (16:00 KST) ---
+          daily_reset_kst = now_kst.replace(hour=16, minute=0, second=0, microsecond=0)
+          if now_kst >= daily_reset_kst:
+              daily_reset_kst += datetime.timedelta(days=1)
+
+          # --- Weekly reset (Monday 16:00 KST) ---
+          days_until_monday = (7 - daily_reset_kst.weekday()) % 7
+          weekly_reset_kst = daily_reset_kst + datetime.timedelta(days=days_until_monday)
+          weekly_reset_kst = weekly_reset_kst.replace(hour=16, minute=0)
+
+          def to_unix(dt):
+              return int((dt - KST_OFFSET).timestamp())
+
+          daily_ts = to_unix(daily_reset_kst)
+          weekly_ts = to_unix(weekly_reset_kst)
+
+          payload = {
+              "embeds": [
+                  {
+                      "title": "Server Reset Schedule",
+                      "description": (
+                          f"All regions reset at <t:{daily_ts}:t>\n\n"
+                          f"• Daily reset <t:{daily_ts}:R>\n"
+                          f"• Weekly reset <t:{weekly_ts}:R>"
+                      ),
+                      "color": 0x2B2D31
+                  }
+              ]
+          }
+
+          url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}/messages/{MESSAGE_ID}"
+          req = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+              method="PATCH"
+          )
+
+          with urllib.request.urlopen(req) as response:
+              response.read()
+
+          print("Discord reset schedule updated.")
+          EOF

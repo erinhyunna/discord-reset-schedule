@@ -21,6 +21,11 @@ jobs:
           import datetime
           import json
           import urllib.request
+          import os
+
+WEBHOOK_ID = os.environ["WEBHOOK_ID"]
+WEBHOOK_TOKEN = os.environ["WEBHOOK_TOKEN"]
+MESSAGE_ID = os.environ["MESSAGE_ID"]
 
           KST_OFFSET = datetime.timedelta(hours=9)
           now_utc = datetime.datetime.utcnow()

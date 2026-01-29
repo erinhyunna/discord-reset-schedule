@@ -14,7 +14,6 @@ jobs:
         env:
           WEBHOOK_ID: ${{ secrets.DISCORD_WEBHOOK_ID }}
           WEBHOOK_TOKEN: ${{ secrets.DISCORD_WEBHOOK_TOKEN }}
-          # If DISCORD_MESSAGE_ID secret does not exist, force it to be an empty string
           MESSAGE_ID: ${{ secrets.DISCORD_MESSAGE_ID || '' }}
         run: |
           python << 'EOF'
@@ -28,15 +27,10 @@ jobs:
           WEBHOOK_TOKEN = os.environ.get("WEBHOOK_TOKEN", "").strip()
           MESSAGE_ID = os.environ.get("MESSAGE_ID", "").strip()
 
-          # ---- Debug (safe) ----
-          print("WEBHOOK_ID:", WEBHOOK_ID)
-          print("WEBHOOK_TOKEN_LEN:", len(WEBHOOK_TOKEN))
-          print("MESSAGE_ID_START:", repr(MESSAGE_ID))
-          # ----------------------
-
           if not WEBHOOK_ID or not WEBHOOK_TOKEN:
               raise RuntimeError("Missing WEBHOOK_ID or WEBHOOK_TOKEN. Check GitHub Secrets.")
 
+          # Time 기준: 16:00 KST
           KST_OFFSET = datetime.timedelta(hours=9)
           now_utc = datetime.datetime.now(datetime.UTC)
           now_kst = now_utc + KST_OFFSET
@@ -53,7 +47,7 @@ jobs:
           weekly_reset_kst = weekly_reset_kst.replace(hour=16, minute=0, second=0, microsecond=0)
 
           def to_unix_from_kst(dt_kst):
-              # Convert a "KST clock time" datetime back to UTC unix seconds
+              # KST datetime -> UTC unix seconds
               dt_utc = dt_kst - KST_OFFSET
               return int(dt_utc.timestamp())
 
@@ -86,11 +80,11 @@ jobs:
                       return resp.read().decode("utf-8")
               except urllib.error.HTTPError as e:
                   body = e.read().decode("utf-8")
-                  raise RuntimeError(f"{method} {url} -> HTTP {e.code}: {body}") from None
+                  safe_url = url.replace(WEBHOOK_TOKEN, "***TOKEN***")
+                  raise RuntimeError(f"{method} {safe_url} -> HTTP {e.code}: {body}") from None
 
-          # 1) If no MESSAGE_ID, create a new message (POST)
+          # 1) MESSAGE_ID가 없으면 새 메시지 생성 (POST) + id 받아오기
           if not MESSAGE_ID:
-              print("No MESSAGE_ID found. Creating a new message via webhook...")
               create_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}?wait=true"
               created = request("POST", create_url, payload)
               created_json = json.loads(created)
@@ -100,9 +94,9 @@ jobs:
                   raise RuntimeError(f"Message created but no ID returned. Response: {created}")
 
               print("CREATED_MESSAGE_ID:", MESSAGE_ID)
-              print("Now save this into GitHub Secret DISCORD_MESSAGE_ID.")
+              print("Save this into GitHub Secret: DISCORD_MESSAGE_ID")
 
-          # 2) Update that message (PATCH)
+          # 2) 해당 메시지 업데이트 (PATCH)
           update_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}/messages/{MESSAGE_ID}"
           request("PATCH", update_url, payload)
           print("Discord reset schedule updated.")

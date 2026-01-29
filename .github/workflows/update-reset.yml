@@ -25,24 +25,31 @@ jobs:
 
           WEBHOOK_ID = os.environ["WEBHOOK_ID"]
           WEBHOOK_TOKEN = os.environ["WEBHOOK_TOKEN"]
-          MESSAGE_ID = os.environ["MESSAGE_ID"]
+          MESSAGE_ID = os.environ.get("MESSAGE_ID", "").strip()
 
-          KST_OFFSET = datetime.timedelta(hours=9)
-          now_utc = datetime.datetime.utcnow()
-          now_kst = now_utc + KST_OFFSET
+          # Timezone setup
+          KST = datetime.timezone(datetime.timedelta(hours=9))
+          UTC = datetime.timezone.utc
 
-          # --- Daily reset (16:00 KST) ---
+          now_utc = datetime.datetime.now(UTC)
+          now_kst = now_utc.astimezone(KST)
+
+          # --- Daily reset: next 16:00 KST ---
           daily_reset_kst = now_kst.replace(hour=16, minute=0, second=0, microsecond=0)
           if now_kst >= daily_reset_kst:
               daily_reset_kst += datetime.timedelta(days=1)
 
-          # --- Weekly reset (Monday 16:00 KST) ---
-          days_until_monday = (7 - daily_reset_kst.weekday()) % 7
+          # --- Weekly reset: next Monday 16:00 KST ---
+          # weekday(): Mon=0 ... Sun=6
+          days_until_monday = (0 - daily_reset_kst.weekday()) % 7
           weekly_reset_kst = daily_reset_kst + datetime.timedelta(days=days_until_monday)
-          weekly_reset_kst = weekly_reset_kst.replace(hour=16, minute=0)
+          weekly_reset_kst = weekly_reset_kst.replace(hour=16, minute=0, second=0, microsecond=0)
+          # If it's already past this Monday 16:00, push to next week
+          if weekly_reset_kst <= now_kst:
+              weekly_reset_kst += datetime.timedelta(days=7)
 
-          def to_unix(dt):
-              return int((dt - KST_OFFSET).timestamp())
+          def to_unix(dt_aware):
+              return int(dt_aware.timestamp())
 
           daily_ts = to_unix(daily_reset_kst)
           weekly_ts = to_unix(weekly_reset_kst)
@@ -61,16 +68,34 @@ jobs:
               ]
           }
 
-          url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}/messages/{MESSAGE_ID}"
-          req = urllib.request.Request(
-              url,
-              data=json.dumps(payload).encode(),
+          # ===============================
+          # CREATE MESSAGE (one-time)
+          # ===============================
+          if not MESSAGE_ID:
+              create_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+              req_create = urllib.request.Request(
+                  create_url,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json"},
+                  method="POST"
+              )
+              with urllib.request.urlopen(req_create) as resp:
+                  body = json.loads(resp.read().decode("utf-8"))
+                  MESSAGE_ID = body["id"]
+                  print("CREATED_MESSAGE_ID:", MESSAGE_ID)
+
+          # ===============================
+          # UPDATE MESSAGE (PATCH)
+          # ===============================
+          update_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}/messages/{MESSAGE_ID}"
+          req_update = urllib.request.Request(
+              update_url,
+              data=json.dumps(payload).encode("utf-8"),
               headers={"Content-Type": "application/json"},
               method="PATCH"
           )
-
-          with urllib.request.urlopen(req) as response:
-              response.read()
+          with urllib.request.urlopen(req_update) as resp:
+              resp.read()
 
           print("Discord reset schedule updated.")
           EOF

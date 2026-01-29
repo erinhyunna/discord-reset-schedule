@@ -2,7 +2,6 @@ name: Update Discord Reset Schedule
 
 on:
   schedule:
-    # Runs every day at 06:59 UTC (15:59 KST)
     - cron: "59 6 * * *"
   workflow_dispatch:
 
@@ -15,7 +14,6 @@ jobs:
         env:
           WEBHOOK_ID: ${{ secrets.DISCORD_WEBHOOK_ID }}
           WEBHOOK_TOKEN: ${{ secrets.DISCORD_WEBHOOK_TOKEN }}
-          MESSAGE_ID: ${{ secrets.DISCORD_MESSAGE_ID }}
         run: |
           python << 'EOF'
           import datetime
@@ -25,34 +23,24 @@ jobs:
 
           WEBHOOK_ID = os.environ["WEBHOOK_ID"]
           WEBHOOK_TOKEN = os.environ["WEBHOOK_TOKEN"]
-          MESSAGE_ID = os.environ.get("MESSAGE_ID", "").strip()
 
-          # Timezone setup
           KST = datetime.timezone(datetime.timedelta(hours=9))
           UTC = datetime.timezone.utc
-
           now_utc = datetime.datetime.now(UTC)
           now_kst = now_utc.astimezone(KST)
 
-          # --- Daily reset: next 16:00 KST ---
           daily_reset_kst = now_kst.replace(hour=16, minute=0, second=0, microsecond=0)
           if now_kst >= daily_reset_kst:
               daily_reset_kst += datetime.timedelta(days=1)
 
-          # --- Weekly reset: next Monday 16:00 KST ---
-          # weekday(): Mon=0 ... Sun=6
           days_until_monday = (0 - daily_reset_kst.weekday()) % 7
           weekly_reset_kst = daily_reset_kst + datetime.timedelta(days=days_until_monday)
           weekly_reset_kst = weekly_reset_kst.replace(hour=16, minute=0, second=0, microsecond=0)
-          # If it's already past this Monday 16:00, push to next week
           if weekly_reset_kst <= now_kst:
               weekly_reset_kst += datetime.timedelta(days=7)
 
-          def to_unix(dt_aware):
-              return int(dt_aware.timestamp())
-
-          daily_ts = to_unix(daily_reset_kst)
-          weekly_ts = to_unix(weekly_reset_kst)
+          daily_ts = int(daily_reset_kst.timestamp())
+          weekly_ts = int(weekly_reset_kst.timestamp())
 
           payload = {
               "embeds": [
@@ -68,34 +56,17 @@ jobs:
               ]
           }
 
-          # ===============================
-          # CREATE MESSAGE (one-time)
-          # ===============================
-          if not MESSAGE_ID:
-              create_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
-              req_create = urllib.request.Request(
-                  create_url,
-                  data=json.dumps(payload).encode("utf-8"),
-                  headers={"Content-Type": "application/json"},
-                  method="POST"
-              )
-              with urllib.request.urlopen(req_create) as resp:
-                  body = json.loads(resp.read().decode("utf-8"))
-                  MESSAGE_ID = body["id"]
-                  print("CREATED_MESSAGE_ID:", MESSAGE_ID)
-
-          # ===============================
-          # UPDATE MESSAGE (PATCH)
-          # ===============================
-          update_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}/messages/{MESSAGE_ID}"
-          req_update = urllib.request.Request(
-              update_url,
+          # Create a brand-new message and print its ID
+          create_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+          req_create = urllib.request.Request(
+              create_url,
               data=json.dumps(payload).encode("utf-8"),
               headers={"Content-Type": "application/json"},
-              method="PATCH"
+              method="POST"
           )
-          with urllib.request.urlopen(req_update) as resp:
-              resp.read()
 
-          print("Discord reset schedule updated.")
+          with urllib.request.urlopen(req_create) as resp:
+              body = json.loads(resp.read().decode("utf-8"))
+              print("CREATED_MESSAGE_ID:", body["id"])
+
           EOF

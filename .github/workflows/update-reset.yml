@@ -30,24 +30,24 @@ jobs:
           if not WEBHOOK_ID or not WEBHOOK_TOKEN:
               raise RuntimeError("Missing WEBHOOK_ID or WEBHOOK_TOKEN. Check GitHub Secrets.")
 
-          # Time 기준: 16:00 KST
+          # --- Time math (KST reset time = 16:00, but display as Discord timestamps in each user's local time) ---
           KST_OFFSET = datetime.timedelta(hours=9)
           now_utc = datetime.datetime.now(datetime.UTC)
           now_kst = now_utc + KST_OFFSET
 
-          # --- Daily reset (16:00 KST) ---
+          # Daily reset: next 16:00 KST
           daily_reset_kst = now_kst.replace(hour=16, minute=0, second=0, microsecond=0)
           if now_kst >= daily_reset_kst:
               daily_reset_kst += datetime.timedelta(days=1)
 
-          # --- Weekly reset (Monday 16:00 KST) ---
+          # Weekly reset: next Monday 16:00 KST
           # weekday(): Mon=0 ... Sun=6
           days_until_monday = (7 - daily_reset_kst.weekday()) % 7
           weekly_reset_kst = daily_reset_kst + datetime.timedelta(days=days_until_monday)
           weekly_reset_kst = weekly_reset_kst.replace(hour=16, minute=0, second=0, microsecond=0)
 
-          def to_unix_from_kst(dt_kst):
-              # KST datetime -> UTC unix seconds
+          def to_unix_from_kst(dt_kst: datetime.datetime) -> int:
+              # Convert a "KST clock time" datetime back to UTC unix seconds
               dt_utc = dt_kst - KST_OFFSET
               return int(dt_utc.timestamp())
 
@@ -68,7 +68,7 @@ jobs:
               ]
           }
 
-          def request(method, url, data=None):
+          def request(method: str, url: str, data=None) -> str:
               req = urllib.request.Request(
                   url,
                   data=(json.dumps(data).encode("utf-8") if data is not None else None),
@@ -80,10 +80,11 @@ jobs:
                       return resp.read().decode("utf-8")
               except urllib.error.HTTPError as e:
                   body = e.read().decode("utf-8")
+                  # Do not leak token in logs
                   safe_url = url.replace(WEBHOOK_TOKEN, "***TOKEN***")
                   raise RuntimeError(f"{method} {safe_url} -> HTTP {e.code}: {body}") from None
 
-          # 1) MESSAGE_ID가 없으면 새 메시지 생성 (POST) + id 받아오기
+          # 1) If no MESSAGE_ID, create a new message (POST) and print the created ID
           if not MESSAGE_ID:
               create_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}?wait=true"
               created = request("POST", create_url, payload)
@@ -94,10 +95,11 @@ jobs:
                   raise RuntimeError(f"Message created but no ID returned. Response: {created}")
 
               print("CREATED_MESSAGE_ID:", MESSAGE_ID)
-              print("Save this into GitHub Secret: DISCORD_MESSAGE_ID")
+              print("Now save this into GitHub Secret DISCORD_MESSAGE_ID and rerun the workflow.")
 
-          # 2) 해당 메시지 업데이트 (PATCH)
+          # 2) Update that message (PATCH)
           update_url = f"https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}/messages/{MESSAGE_ID}"
           request("PATCH", update_url, payload)
+
           print("Discord reset schedule updated.")
           EOF
